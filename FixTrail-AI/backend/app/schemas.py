@@ -28,12 +28,37 @@ class TokenResponse(BaseModel):
 
 class RepairCreate(BaseModel):
     appliance_name: str = Field(min_length=2, max_length=100)
-    problem_description: str = Field(min_length=10, max_length=2000)
+    problem_description: str = Field(
+        min_length=10,
+        max_length=2000
+    )
 
 
 class EstimateCreate(BaseModel):
     estimated_cost: int = Field(gt=0, le=10000000)
-    estimate_description: str = Field(min_length=5, max_length=2000)
+    estimate_description: str = Field(
+        min_length=5,
+        max_length=2000
+    )
+
+
+class RepairEstimateCreate(BaseModel):
+    estimated_cost: int = Field(gt=0, le=10000000)
+    estimate_description: str = Field(
+        min_length=5,
+        max_length=2000
+    )
+
+
+class RepairEstimateResponse(BaseModel):
+    id: int
+    repair_id: int
+    technician_id: int
+    estimated_cost: int
+    estimate_description: str
+    created_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
 
 
 class RepairResponse(BaseModel):
@@ -48,6 +73,7 @@ class RepairResponse(BaseModel):
     created_at: Optional[datetime]
 
     model_config = {"from_attributes": True}
+
 
 class RepairImageResponse(BaseModel):
     id: int

@@ -63,13 +63,13 @@ export async function register(userData) {
   })
 }
 
-// Upload a repair image
+// Image upload
 export async function uploadRepairImage(repairId, file, imageType) {
   const formData = new FormData()
   formData.append('image', file)
 
   return apiRequest(
-    `/api/repairs/${repairId}/images?image_type=${imageType}`,
+    `/api/repairs/${repairId}/images?image_type=${encodeURIComponent(imageType)}`,
     {
       method: 'POST',
       body: formData,
@@ -77,12 +77,27 @@ export async function uploadRepairImage(repairId, file, imageType) {
   )
 }
 
-// Get repair images
+// Retrieve repair images
 export async function getRepairImages(repairId) {
   return apiRequest(`/api/repairs/${repairId}/images`)
 }
 
-// Submit customer review
+// Retrieve estimates
+export async function getRepairEstimates(repairId) {
+  return apiRequest(`/api/repairs/${repairId}/estimates`)
+}
+
+// Select technician estimate
+export async function selectRepairEstimate(repairId, estimateId) {
+  return apiRequest(
+    `/api/repairs/${repairId}/estimates/${estimateId}/select`,
+    {
+      method: 'POST',
+    }
+  )
+}
+
+// Submit review
 export async function submitReview(repairId, review) {
   return apiRequest(`/api/repairs/${repairId}/review`, {
     method: 'POST',
@@ -90,13 +105,17 @@ export async function submitReview(repairId, review) {
   })
 }
 
-// Get technician reviews
+// Technician ratings
 export async function getTechnicianReviews(technicianId) {
-  return apiRequest(`/api/repairs/technicians/${technicianId}/reviews`)
+  return apiRequest(
+    `/api/repairs/technicians/${technicianId}/reviews`
+  )
 }
 
+// Image URL
 export function getImageUrl(filePath) {
-  return `${API_URL}/${filePath.replace(/\\/g, '/')}`
+  const safePath = filePath.replace(/\\/g, '/')
+  return `${API_URL}/${safePath}`
 }
 
 export function logout() {

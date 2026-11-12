@@ -9,27 +9,35 @@ import {
   submitReview,
   getTechnicianReviews,
   getImageUrl,
+  getRepairEstimates,
+  selectRepairEstimate,
 } from '../services/api'
 
 export default function Dashboard({ user, onLogout }) {
   const [repairs, setRepairs] = useState([])
   const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(false)
+
   const [form, setForm] = useState({
     appliance_name: '',
     problem_description: '',
   })
 
-  const [estimate, setEstimate] = useState({})
-  const [damageFiles, setDamageFiles] = useState({})
+  const [damageFiles, setDamageFiles] = useState([])
   const [completionFiles, setCompletionFiles] = useState({})
+  const [estimate, setEstimate] = useState({})
   const [images, setImages] = useState({})
-  const [reviews, setReviews] = useState({})
-  const [reviewForms, setReviewForms] = useState({})
+  const [repairEstimates, setRepairEstimates] = useState({})
   const [ratings, setRatings] = useState({})
+  const [reviewForms, setReviewForms] = useState({})
+  const [reviewedRepairs, setReviewedRepairs] = useState({})
 
   const isCustomer = user.role === 'customer'
 
+  // Load repairs and related information
   const loadRepairs = async () => {
+    setLoading(true)
+
     try {
       const endpoint = isCustomer
         ? '/api/repairs/my'
@@ -38,45 +46,44 @@ export default function Dashboard({ user, onLogout }) {
       const data = await apiRequest(endpoint)
       setRepairs(data)
 
-      // Load images for every repair
+      const imageResults = {}
+      const estimateResults = {}
+      const ratingResults = {}
+
       for (const repair of data) {
         try {
-          const imageData = await getRepairImages(repair.id)
-
-          setImages(previous => ({
-            ...previous,
-            [repair.id]: imageData,
-          }))
-        } catch (error) {
-          console.error('Image loading error:', error)
+          imageResults[repair.id] =
+            await getRepairImages(repair.id)
+        } catch {
+          imageResults[repair.id] = []
         }
-      }
 
-      // Load technician ratings
-      if (isCustomer) {
-        const technicianIds = [
-          ...new Set(
-            data
-              .map(repair => repair.technician_id)
-              .filter(Boolean)
-          ),
-        ]
-
-        for (const technicianId of technicianIds) {
+        if (isCustomer && repair.status === 'reported') {
           try {
-            const result = await getTechnicianReviews(technicianId)
+            estimateResults[repair.id] =
+              await getRepairEstimates(repair.id)
+          } catch {
+            estimateResults[repair.id] = []
+          }
+        }
 
-            setRatings(previous => ({
-              ...previous,
-              [technicianId]: result,
-            }))
-          } catch (error) {
-            console.error('Review loading error:', error)
+        if (isCustomer && repair.technician_id) {
+          try {
+            ratingResults[repair.technician_id] =
+              await getTechnicianReviews(repair.technician_id)
+          } catch {
+            // No rating available yet
           }
         }
       }
+
+      setImages(imageResults)
+      setRepairEstimates(estimateResults)
+      setRatings(ratingResults)
     } catch (error) {
       setMessage(error.message)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -84,6 +91,7 @@ export default function Dashboard({ user, onLogout }) {
     loadRepairs()
   }, [])
 
+  // Customer creates repair
   const createRepair = async (e) => {
     e.preventDefault()
     setMessage('')
@@ -94,9 +102,7 @@ export default function Dashboard({ user, onLogout }) {
         body: JSON.stringify(form),
       })
 
-      const selectedFiles = damageFiles[repair.id] || []
-
-      for (const file of selectedFiles) {
+      for (const file of damageFiles) {
         await uploadRepairImage(
           repair.id,
           file,
@@ -109,9 +115,9 @@ export default function Dashboard({ user, onLogout }) {
         problem_description: '',
       })
 
-      setDamageFiles({})
-      setMessage('Repair request and damage images submitted successfully!')
+      setDamageFiles([])
 
+      setMessage('Repair request submitted successfully!')
       await loadRepairs()
     } catch (error) {
       setMessage(error.message)
@@ -119,11 +125,8 @@ export default function Dashboard({ user, onLogout }) {
     }
   }
 
-  const performAction = async (
-    path,
-    method = 'POST',
-    body = null
-  ) => {
+  // General action
+  const performAction = async (path, method = 'POST', body = null) => {
     setMessage('')
 
     try {
@@ -139,11 +142,12 @@ export default function Dashboard({ user, onLogout }) {
     }
   }
 
+  // Technician submits estimate
   const submitEstimate = async (repairId) => {
     const value = estimate[repairId]
 
-    if (!value?.cost || !value?.description) {
-      setMessage('Enter both estimate amount and description.')
+    if (!value?.cost || !value?.description?.trim()) {
+      setMessage('Enter estimate amount and description.')
       return
     }
 
@@ -157,16 +161,29 @@ export default function Dashboard({ user, onLogout }) {
     )
   }
 
-  const uploadCompletionImages = async (repairId) => {
-    const selectedFiles = completionFiles[repairId] || []
+  // Customer selects estimate
+  const chooseEstimate = async (repairId, estimateId) => {
+    try {
+      await selectRepairEstimate(repairId, estimateId)
 
-    if (selectedFiles.length === 0) {
-      setMessage('Please select at least one completion image.')
+      setMessage('Technician selected successfully!')
+      await loadRepairs()
+    } catch (error) {
+      setMessage(error.message)
+    }
+  }
+
+  // Technician uploads completion images
+  const uploadCompletionImages = async (repairId) => {
+    const files = completionFiles[repairId] || []
+
+    if (!files.length) {
+      setMessage('Please select completion images.')
       return
     }
 
     try {
-      for (const file of selectedFiles) {
+      for (const file of files) {
         await uploadRepairImage(
           repairId,
           file,
@@ -179,13 +196,14 @@ export default function Dashboard({ user, onLogout }) {
         [repairId]: [],
       }))
 
-      setMessage('Repair completion images uploaded!')
+      setMessage('Completion images uploaded successfully!')
       await loadRepairs()
     } catch (error) {
       setMessage(error.message)
     }
   }
 
+  // Customer submits review
   const handleReview = async (repairId) => {
     const review = reviewForms[repairId]
 
@@ -200,22 +218,27 @@ export default function Dashboard({ user, onLogout }) {
         comment: review.comment || '',
       })
 
-      setMessage('Thank you! Your review has been submitted.')
+      setReviewedRepairs(previous => ({
+        ...previous,
+        [repairId]: true,
+      }))
 
+      setMessage('Review submitted successfully!')
       await loadRepairs()
     } catch (error) {
       setMessage(error.message)
     }
   }
 
+  // Display images
   const renderImages = (repairId, imageType) => {
-    const repairImages = (images[repairId] || []).filter(
-      image => image.image_type === imageType
+    const list = (images[repairId] || []).filter(
+      item => item.image_type === imageType
     )
 
-    if (repairImages.length === 0) {
+    if (!list.length) {
       return (
-        <p className="text-sm text-slate-500">
+        <p className="mt-2 text-sm text-slate-500">
           No images uploaded yet.
         </p>
       )
@@ -223,15 +246,15 @@ export default function Dashboard({ user, onLogout }) {
 
     return (
       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {repairImages.map(image => (
+        {list.map(item => (
           <a
-            key={image.id}
-            href={getImageUrl(image.file_path)}
+            key={item.id}
+            href={getImageUrl(item.file_path)}
             target="_blank"
             rel="noreferrer"
           >
             <img
-              src={getImageUrl(image.file_path)}
+              src={getImageUrl(item.file_path)}
               alt="Repair evidence"
               className="h-32 w-full rounded-lg border border-slate-700 object-cover"
             />
@@ -243,6 +266,8 @@ export default function Dashboard({ user, onLogout }) {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
+
+      {/* NAVBAR */}
       <nav className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 px-6 py-5">
         <h1 className="text-2xl font-bold text-blue-400">
           FixTrail AI
@@ -266,14 +291,16 @@ export default function Dashboard({ user, onLogout }) {
       </nav>
 
       <main className="mx-auto max-w-6xl px-6 py-10">
+
+        {/* HEADER */}
         <h2 className="mb-2 text-3xl font-bold">
           {isCustomer ? 'Customer Dashboard' : 'Technician Dashboard'}
         </h2>
 
         <p className="mb-8 text-slate-400">
           {isCustomer
-            ? 'Report appliance problems and track your repairs.'
-            : 'Find repair requests and manage your assigned jobs.'}
+            ? 'Report problems, compare estimates and track repairs.'
+            : 'View repair requests and submit competitive estimates.'}
         </p>
 
         {message && (
@@ -282,7 +309,7 @@ export default function Dashboard({ user, onLogout }) {
           </div>
         )}
 
-        {/* CUSTOMER REPAIR FORM */}
+        {/* CUSTOMER CREATE REPAIR */}
         {isCustomer && (
           <form
             onSubmit={createRepair}
@@ -295,7 +322,7 @@ export default function Dashboard({ user, onLogout }) {
             <input
               required
               minLength={2}
-              placeholder="Appliance name (e.g. Washing Machine)"
+              placeholder="Appliance name"
               value={form.appliance_name}
               onChange={e =>
                 setForm({
@@ -329,24 +356,21 @@ export default function Dashboard({ user, onLogout }) {
               accept="image/jpeg,image/png,image/webp"
               multiple
               onChange={e =>
-                setDamageFiles({
-                  ...damageFiles,
-                  new: Array.from(e.target.files || []),
-                })
+                setDamageFiles(Array.from(e.target.files || []))
               }
-              className="mb-3 block w-full text-sm text-slate-300"
+              className="mb-4 block w-full text-sm text-slate-300"
             />
 
-            {(damageFiles.new || []).length > 0 && (
-              <div className="mb-4 flex flex-wrap gap-3">
-                {damageFiles.new.map((file, index) => (
+            {damageFiles.length > 0 && (
+              <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {damageFiles.map((file, index) => (
                   <div key={index}>
                     <img
                       src={URL.createObjectURL(file)}
-                      alt="Selected damage"
-                      className="h-24 w-24 rounded-lg object-cover"
+                      alt="Damage preview"
+                      className="h-28 w-full rounded-lg object-cover"
                     />
-                    <p className="max-w-24 truncate text-xs text-slate-400">
+                    <p className="truncate text-xs text-slate-400">
                       {file.name}
                     </p>
                   </div>
@@ -354,22 +378,39 @@ export default function Dashboard({ user, onLogout }) {
               </div>
             )}
 
-            <button className="rounded-lg bg-blue-600 px-5 py-3 font-semibold">
+            <button
+              disabled={loading}
+              className="rounded-lg bg-blue-600 px-5 py-3 font-semibold disabled:opacity-50"
+            >
               Submit repair request
             </button>
           </form>
         )}
 
-        <h3 className="mb-5 text-xl font-semibold">
-          {isCustomer ? 'My repairs' : 'Available repair jobs'}
-        </h3>
+        {/* REPAIR LIST */}
+        <div className="mb-5 flex items-center justify-between">
+          <h3 className="text-xl font-semibold">
+            {isCustomer ? 'My repairs' : 'Available repair jobs'}
+          </h3>
+
+          <button
+            onClick={loadRepairs}
+            disabled={loading}
+            className="rounded-lg bg-slate-800 px-4 py-2 text-sm"
+          >
+            {loading ? 'Loading...' : 'Refresh'}
+          </button>
+        </div>
 
         <div className="grid gap-5 md:grid-cols-2">
+
           {repairs.map(repair => (
             <div
               key={repair.id}
               className="rounded-2xl border border-slate-800 bg-slate-900 p-6"
             >
+
+              {/* REPAIR INFORMATION */}
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h4 className="text-lg font-semibold">
                   {repair.appliance_name}
@@ -380,77 +421,121 @@ export default function Dashboard({ user, onLogout }) {
                 </span>
               </div>
 
-              <p className="mb-4 text-sm leading-6 text-slate-400">
+              <p className="mb-4 text-sm text-slate-400">
                 {repair.problem_description}
               </p>
 
-              <p className="mb-2 text-sm">
+              <p className="mb-3 text-sm">
                 Repair ID: #{repair.id}
               </p>
 
-              {/* CUSTOMER DAMAGE IMAGES */}
+              {/* DAMAGE IMAGES */}
               <div className="mb-5 border-t border-slate-800 pt-4">
                 <h5 className="font-semibold text-blue-300">
                   Customer damage images
                 </h5>
-
                 {renderImages(repair.id, 'customer_damage')}
               </div>
 
-              {/* ESTIMATE DETAILS */}
+              {/* CUSTOMER ESTIMATE COMPARISON */}
+              {isCustomer && repair.status === 'reported' && (
+                <div className="my-5 border-t border-slate-800 pt-4">
+                  <h5 className="mb-3 text-lg font-semibold text-blue-300">
+                    Technician estimates
+                  </h5>
+
+                  {(repairEstimates[repair.id] || []).length === 0 && (
+                    <p className="text-sm text-slate-400">
+                      Waiting for technician estimates.
+                    </p>
+                  )}
+
+                  <div className="space-y-3">
+                    {(repairEstimates[repair.id] || []).map(item => (
+                      <div
+                        key={item.id}
+                        className="rounded-xl border border-slate-700 bg-slate-950 p-4"
+                      >
+                        <div className="flex items-center justify-between">
+                          <h6 className="font-semibold">
+                            Technician #{item.technician_id}
+                          </h6>
+
+                          <span className="font-bold text-green-400">
+                            ₹{item.estimated_cost}
+                          </span>
+                        </div>
+
+                        <p className="my-3 text-sm text-slate-400">
+                          {item.estimate_description}
+                        </p>
+
+                        <button
+                          onClick={() =>
+                            chooseEstimate(repair.id, item.id)
+                          }
+                          className="rounded-lg bg-blue-600 px-4 py-2"
+                        >
+                          Select this technician
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* SELECTED ESTIMATE */}
               {repair.estimated_cost != null && (
                 <div className="mb-4 rounded-lg bg-slate-800 p-4">
                   <p className="font-semibold text-green-400">
-                    Estimate: ₹{repair.estimated_cost}
+                    Selected estimate: ₹{repair.estimated_cost}
                   </p>
 
                   <p className="mt-1 text-sm text-slate-300">
                     {repair.estimate_description}
                   </p>
+
+                  <p className="mt-2 text-sm text-slate-400">
+                    Technician: #{repair.technician_id}
+                  </p>
                 </div>
               )}
 
-              {/* TECHNICIAN CLAIM */}
+              {/* TECHNICIAN SUBMITS ESTIMATE */}
               {!isCustomer && repair.status === 'reported' && (
-                <button
-                  onClick={() =>
-                    performAction(`/api/repairs/${repair.id}/claim`)
-                  }
-                  className="rounded-lg bg-blue-600 px-4 py-2"
-                >
-                  Claim repair
-                </button>
-              )}
+                <div className="space-y-3 border-t border-slate-800 pt-4">
+                  <h5 className="font-semibold text-blue-300">
+                    Submit your estimate
+                  </h5>
 
-              {/* TECHNICIAN ESTIMATE */}
-              {!isCustomer && repair.status === 'claimed' && (
-                <div className="space-y-3">
                   <input
                     type="number"
                     min="1"
                     placeholder="Estimate amount (₹)"
+                    value={estimate[repair.id]?.cost || ''}
                     onChange={e =>
-                      setEstimate({
-                        ...estimate,
+                      setEstimate(previous => ({
+                        ...previous,
                         [repair.id]: {
-                          ...estimate[repair.id],
+                          ...previous[repair.id],
                           cost: e.target.value,
                         },
-                      })
+                      }))
                     }
                     className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3"
                   />
 
                   <textarea
-                    placeholder="Describe the proposed repair work"
+                    placeholder="Describe proposed repair work"
+                    value={estimate[repair.id]?.description || ''}
                     onChange={e =>
-                      setEstimate({
-                        ...estimate,
+                      setEstimate(previous => ({
+                        ...previous,
                         [repair.id]: {
-                          ...estimate[repair.id],
+                          ...previous[repair.id],
                           description: e.target.value,
                         },
-                      })
+                      }))
                     }
                     className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3"
                   />
@@ -464,7 +549,7 @@ export default function Dashboard({ user, onLogout }) {
                 </div>
               )}
 
-              {/* CUSTOMER APPROVAL */}
+              {/* CUSTOMER APPROVES SELECTED ESTIMATE */}
               {isCustomer && repair.status === 'estimated' && (
                 <button
                   onClick={() =>
@@ -476,7 +561,7 @@ export default function Dashboard({ user, onLogout }) {
                 </button>
               )}
 
-              {/* TECHNICIAN START REPAIR */}
+              {/* TECHNICIAN STARTS REPAIR */}
               {!isCustomer && repair.status === 'approved' && (
                 <button
                   onClick={() =>
@@ -491,7 +576,7 @@ export default function Dashboard({ user, onLogout }) {
                 </button>
               )}
 
-              {/* TECHNICIAN COMPLETION IMAGE UPLOAD */}
+              {/* COMPLETION IMAGE UPLOAD */}
               {!isCustomer &&
                 ['approved', 'in_progress', 'completed'].includes(repair.status) && (
                   <div className="my-5 border-t border-slate-800 pt-4">
@@ -501,30 +586,38 @@ export default function Dashboard({ user, onLogout }) {
 
                     {renderImages(repair.id, 'repair_completion')}
 
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      multiple
-                      onChange={e =>
-                        setCompletionFiles({
-                          ...completionFiles,
-                          [repair.id]: Array.from(e.target.files || []),
-                        })
-                      }
-                      className="mt-4 block w-full text-sm text-slate-300"
-                    />
+                    {repair.status !== 'completed' && (
+                      <>
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          multiple
+                          onChange={e =>
+                            setCompletionFiles(previous => ({
+                              ...previous,
+                              [repair.id]: Array.from(
+                                e.target.files || []
+                              ),
+                            }))
+                          }
+                          className="mt-4 block w-full text-sm text-slate-300"
+                        />
 
-                    <button
-                      type="button"
-                      onClick={() => uploadCompletionImages(repair.id)}
-                      className="mt-3 rounded-lg bg-blue-600 px-4 py-2"
-                    >
-                      Upload completion images
-                    </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            uploadCompletionImages(repair.id)
+                          }
+                          className="mt-3 rounded-lg bg-blue-600 px-4 py-2"
+                        >
+                          Upload completion images
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
 
-              {/* TECHNICIAN COMPLETE REPAIR */}
+              {/* TECHNICIAN COMPLETES REPAIR */}
               {!isCustomer && repair.status === 'in_progress' && (
                 <button
                   onClick={() =>
@@ -539,7 +632,7 @@ export default function Dashboard({ user, onLogout }) {
                 </button>
               )}
 
-              {/* CUSTOMER COMPLETION IMAGES */}
+              {/* CUSTOMER VIEWS COMPLETION IMAGES */}
               {isCustomer && repair.status === 'completed' && (
                 <div className="mb-5 border-t border-slate-800 pt-4">
                   <h5 className="font-semibold text-green-300">
@@ -550,6 +643,24 @@ export default function Dashboard({ user, onLogout }) {
                 </div>
               )}
 
+              {/* TECHNICIAN RATING */}
+              {isCustomer && repair.technician_id && (
+                <div className="my-4 rounded-lg bg-slate-800 p-3">
+                  <p className="font-semibold text-yellow-300">
+                    Technician rating
+                  </p>
+
+                  <p className="mt-1">
+                    ★ {ratings[repair.technician_id]?.average_rating || 'No rating'}
+                    {ratings[repair.technician_id] && ' / 5'}
+                  </p>
+
+                  <p className="text-xs text-slate-400">
+                    {ratings[repair.technician_id]?.total_reviews || 0} reviews
+                  </p>
+                </div>
+              )}
+
               {/* CUSTOMER REVIEW */}
               {isCustomer && repair.status === 'completed' && (
                 <div className="mt-5 border-t border-slate-800 pt-4">
@@ -557,73 +668,73 @@ export default function Dashboard({ user, onLogout }) {
                     Rate your technician
                   </h5>
 
-                  <div className="mb-3 flex gap-2">
-                    {[1, 2, 3, 4, 5].map(star => (
-                      <button
-                        type="button"
-                        key={star}
-                        onClick={() =>
-                          setReviewForms({
-                            ...reviewForms,
-                            [repair.id]: {
-                              ...reviewForms[repair.id],
-                              rating: star,
-                            },
-                          })
-                        }
-                        className={`text-3xl ${
-                          star <= (reviewForms[repair.id]?.rating || 0)
-                            ? 'text-yellow-400'
-                            : 'text-slate-600'
-                        }`}
-                      >
-                        ★
-                      </button>
-                    ))}
-                  </div>
-
-                  <textarea
-                    placeholder="Write your feedback..."
-                    value={reviewForms[repair.id]?.comment || ''}
-                    onChange={e =>
-                      setReviewForms({
-                        ...reviewForms,
-                        [repair.id]: {
-                          ...reviewForms[repair.id],
-                          comment: e.target.value,
-                        },
-                      })
-                    }
-                    className="mb-3 w-full rounded-lg border border-slate-700 bg-slate-950 p-3"
-                  />
-
-                  <button
-                    onClick={() => handleReview(repair.id)}
-                    className="rounded-lg bg-yellow-600 px-4 py-2 font-semibold"
-                  >
-                    Submit review
-                  </button>
-
-                  {repair.technician_id && ratings[repair.technician_id] && (
-                    <p className="mt-3 text-sm text-yellow-300">
-                      Technician rating: ★
-                      {ratings[repair.technician_id].average_rating}
-                      {' '}(
-                      {ratings[repair.technician_id].total_reviews}
-                      {' '}reviews)
+                  {reviewedRepairs[repair.id] ? (
+                    <p className="text-green-400">
+                      Your review has been submitted.
                     </p>
+                  ) : (
+                    <>
+                      <div className="mb-3 flex gap-2">
+                        {[1, 2, 3, 4, 5].map(star => (
+                          <button
+                            type="button"
+                            key={star}
+                            onClick={() =>
+                              setReviewForms(previous => ({
+                                ...previous,
+                                [repair.id]: {
+                                  ...previous[repair.id],
+                                  rating: star,
+                                },
+                              }))
+                            }
+                            className={`text-3xl ${
+                              star <= (reviewForms[repair.id]?.rating || 0)
+                                ? 'text-yellow-400'
+                                : 'text-slate-600'
+                            }`}
+                          >
+                            ★
+                          </button>
+                        ))}
+                      </div>
+
+                      <textarea
+                        placeholder="Write your feedback..."
+                        value={reviewForms[repair.id]?.comment || ''}
+                        onChange={e =>
+                          setReviewForms(previous => ({
+                            ...previous,
+                            [repair.id]: {
+                              ...previous[repair.id],
+                              comment: e.target.value,
+                            },
+                          }))
+                        }
+                        className="mb-3 w-full rounded-lg border border-slate-700 bg-slate-950 p-3"
+                      />
+
+                      <button
+                        onClick={() => handleReview(repair.id)}
+                        className="rounded-lg bg-yellow-600 px-4 py-2 font-semibold"
+                      >
+                        Submit review
+                      </button>
+                    </>
                   )}
                 </div>
               )}
+
             </div>
           ))}
         </div>
 
-        {repairs.length === 0 && (
+        {repairs.length === 0 && !loading && (
           <p className="rounded-xl border border-slate-800 p-8 text-center text-slate-400">
             No repair requests found.
           </p>
         )}
+
       </main>
     </div>
   )

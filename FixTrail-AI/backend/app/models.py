@@ -5,7 +5,8 @@ from sqlalchemy import (
     String,
     ForeignKey,
     DateTime,
-    Text
+    Text,
+    UniqueConstraint
 )
 from sqlalchemy.sql import func
 from app.database import Base
@@ -52,6 +53,7 @@ class RepairJob(Base):
         default="reported"
     )
 
+    # Stores the selected technician's estimate
     estimated_cost = Column(Integer, nullable=True)
     estimate_description = Column(Text, nullable=True)
 
@@ -66,7 +68,41 @@ class RepairJob(Base):
         onupdate=func.now()
     )
 
-# Stores uploaded repair images
+
+class RepairEstimate(Base):
+    __tablename__ = "repair_estimates"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "repair_id",
+            "technician_id",
+            name="uq_repair_technician_estimate"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    repair_id = Column(
+        Integer,
+        ForeignKey("repair_jobs.id"),
+        nullable=False
+    )
+
+    technician_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False
+    )
+
+    estimated_cost = Column(Integer, nullable=False)
+    estimate_description = Column(Text, nullable=False)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+
 class RepairImage(Base):
     __tablename__ = "repair_images"
 
@@ -93,7 +129,6 @@ class RepairImage(Base):
     )
 
 
-# Stores customer reviews of completed repairs
 class RepairReview(Base):
     __tablename__ = "repair_reviews"
 
