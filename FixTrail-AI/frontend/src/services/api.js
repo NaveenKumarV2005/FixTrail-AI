@@ -63,6 +63,42 @@ export async function register(userData) {
   })
 }
 
+// Upload a repair image
+export async function uploadRepairImage(repairId, file, imageType) {
+  const formData = new FormData()
+  formData.append('image', file)
+
+  return apiRequest(
+    `/api/repairs/${repairId}/images?image_type=${imageType}`,
+    {
+      method: 'POST',
+      body: formData,
+    }
+  )
+}
+
+// Get repair images
+export async function getRepairImages(repairId) {
+  return apiRequest(`/api/repairs/${repairId}/images`)
+}
+
+// Submit customer review
+export async function submitReview(repairId, review) {
+  return apiRequest(`/api/repairs/${repairId}/review`, {
+    method: 'POST',
+    body: JSON.stringify(review),
+  })
+}
+
+// Get technician reviews
+export async function getTechnicianReviews(technicianId) {
+  return apiRequest(`/api/repairs/technicians/${technicianId}/reviews`)
+}
+
+export function getImageUrl(filePath) {
+  return `${API_URL}/${filePath.replace(/\\/g, '/')}`
+}
+
 export function logout() {
   localStorage.removeItem('fixtrail_token')
   localStorage.removeItem('fixtrail_user')

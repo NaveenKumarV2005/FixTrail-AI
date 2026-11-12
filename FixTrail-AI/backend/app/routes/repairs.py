@@ -380,3 +380,37 @@ async def upload_repair_image(
         "image_id": record.id,
         "file_path": record.file_path
     }
+
+
+# View images belonging to a repair
+@router.get("/{repair_id}/images")
+def get_repair_images(
+    repair_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    repair = db.query(RepairJob).filter(
+        RepairJob.id == repair_id
+    ).first()
+
+    if not repair:
+        raise HTTPException(status_code=404, detail="Repair not found")
+
+    # Only the customer and assigned technician can view images
+    if user.id != repair.customer_id and user.id != repair.technician_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    images = db.query(RepairImage).filter(
+        RepairImage.repair_id == repair_id
+    ).order_by(RepairImage.id.asc()).all()
+
+    return [
+        {
+            "id": image.id,
+            "repair_id": image.repair_id,
+            "image_type": image.image_type,
+            "file_path": image.file_path,
+            "uploaded_by": image.uploaded_by
+        }
+        for image in images
+    ]
