@@ -65,3 +65,63 @@ class RepairJob(Base):
         server_default=func.now(),
         onupdate=func.now()
     )
+
+# Stores uploaded repair images
+class RepairImage(Base):
+    __tablename__ = "repair_images"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    repair_id = Column(
+        Integer,
+        ForeignKey("repair_jobs.id"),
+        nullable=False
+    )
+
+    uploaded_by = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False
+    )
+
+    image_type = Column(String(30), nullable=False)
+    file_path = Column(String(500), nullable=False)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+
+# Stores customer reviews of completed repairs
+class RepairReview(Base):
+    __tablename__ = "repair_reviews"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    repair_id = Column(
+        Integer,
+        ForeignKey("repair_jobs.id"),
+        unique=True,
+        nullable=False
+    )
+
+    customer_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False
+    )
+
+    technician_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False
+    )
+
+    rating = Column(Integer, nullable=False)
+    comment = Column(Text, nullable=True)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )

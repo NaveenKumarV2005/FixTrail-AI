@@ -1,6 +1,8 @@
 
 import os
 
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +19,14 @@ app = FastAPI(
     title="FixTrail AI",
     description="AI-powered repair verification and warranty platform",
     version="1.0.0"
+)
+
+Path("uploads/repairs").mkdir(parents=True, exist_ok=True)
+
+app.mount(
+    "/uploads",
+    StaticFiles(directory="uploads"),
+    name="uploads"
 )
 
 frontend_url = os.getenv(

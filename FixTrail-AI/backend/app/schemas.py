@@ -48,3 +48,33 @@ class RepairResponse(BaseModel):
     created_at: Optional[datetime]
 
     model_config = {"from_attributes": True}
+
+class RepairImageResponse(BaseModel):
+    id: int
+    repair_id: int
+    uploaded_by: int
+    image_type: str
+    file_path: str
+    created_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+class ReviewCreate(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    comment: Optional[str] = Field(
+        default=None,
+        max_length=1000
+    )
+
+
+class ReviewResponse(BaseModel):
+    id: int
+    repair_id: int
+    customer_id: int
+    technician_id: int
+    rating: int
+    comment: Optional[str]
+    created_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
