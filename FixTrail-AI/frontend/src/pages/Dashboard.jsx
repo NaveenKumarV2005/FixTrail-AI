@@ -1,5 +1,6 @@
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react';
+import PassportList from '../components/PassportList';
 
 import {
   apiRequest,
@@ -11,144 +12,188 @@ import {
   getImageUrl,
   getRepairEstimates,
   selectRepairEstimate,
-} from '../services/api'
+  verifyRepair,
+  describeDamageImage,
+} from '../services/api';
 
 export default function Dashboard({ user, onLogout }) {
-  const [repairs, setRepairs] = useState([])
-  const [message, setMessage] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [repairs, setRepairs] = useState([]);
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const [form, setForm] = useState({
     appliance_name: '',
     problem_description: '',
-  })
+  });
 
-  const [damageFiles, setDamageFiles] = useState([])
-  const [completionFiles, setCompletionFiles] = useState({})
-  const [estimate, setEstimate] = useState({})
-  const [images, setImages] = useState({})
-  const [repairEstimates, setRepairEstimates] = useState({})
-  const [ratings, setRatings] = useState({})
-  const [reviewForms, setReviewForms] = useState({})
-  const [reviewedRepairs, setReviewedRepairs] = useState({})
+  const [damageFiles, setDamageFiles] = useState([]);
+  const [completionFiles, setCompletionFiles] = useState({});
+  const [estimate, setEstimate] = useState({});
+  const [images, setImages] = useState({});
+  const [repairEstimates, setRepairEstimates] = useState({});
+  const [ratings, setRatings] = useState({});
+  const [reviewForms, setReviewForms] = useState({});
+  const [reviewedRepairs, setReviewedRepairs] = useState({});
+  const [verificationReports, setVerificationReports] = useState({});
+  const [verificationLoading, setVerificationLoading] = useState({});
 
-  const isCustomer = user.role === 'customer'
+  // AI damage description state
+  const [descriptionLoading, setDescriptionLoading] = useState(false);
+
+  const isCustomer = user.role === 'customer';
 
   // Load repairs and related information
   const loadRepairs = async () => {
-    setLoading(true)
+    setLoading(true);
 
     try {
       const endpoint = isCustomer
         ? '/api/repairs/my'
-        : '/api/repairs/available'
+        : '/api/repairs/available';
 
-      const data = await apiRequest(endpoint)
-      setRepairs(data)
+      const data = await apiRequest(endpoint);
+      setRepairs(data);
 
-      const imageResults = {}
-      const estimateResults = {}
-      const ratingResults = {}
+      const imageResults = {};
+      const estimateResults = {};
+      const ratingResults = {};
 
       for (const repair of data) {
         try {
-          imageResults[repair.id] =
-            await getRepairImages(repair.id)
+          imageResults[repair.id] = await getRepairImages(repair.id);
         } catch {
-          imageResults[repair.id] = []
+          imageResults[repair.id] = [];
         }
 
         if (isCustomer && repair.status === 'reported') {
           try {
             estimateResults[repair.id] =
-              await getRepairEstimates(repair.id)
+              await getRepairEstimates(repair.id);
           } catch {
-            estimateResults[repair.id] = []
+            estimateResults[repair.id] = [];
           }
         }
 
         if (isCustomer && repair.technician_id) {
           try {
             ratingResults[repair.technician_id] =
-              await getTechnicianReviews(repair.technician_id)
+              await getTechnicianReviews(repair.technician_id);
           } catch {
             // No rating available yet
           }
         }
       }
 
-      setImages(imageResults)
-      setRepairEstimates(estimateResults)
-      setRatings(ratingResults)
+      setImages(imageResults);
+      setRepairEstimates(estimateResults);
+      setRatings(ratingResults);
     } catch (error) {
-      setMessage(error.message)
+      setMessage(error.message);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
-    loadRepairs()
-  }, [])
+    loadRepairs();
+  }, []);
+
+  // Generate a description from the first uploaded damage image
+  const generateDamageDescription = async () => {
+    if (!damageFiles.length) {
+      setMessage('Please upload a damage image first.');
+      return;
+    }
+
+    setDescriptionLoading(true);
+    setMessage('');
+
+    try {
+      const result = await describeDamageImage(damageFiles[0]);
+
+      if (!result.description) {
+        throw new Error('AI could not generate a description.');
+      }
+
+      setForm((previous) => ({
+        ...previous,
+        problem_description: previous.problem_description.trim()
+          ? `${previous.problem_description.trim()}\n\nAI image suggestion: ${result.description}`
+          : result.description,
+      }));
+
+      setMessage(
+        'AI description generated. Please review and edit it before submitting.'
+      );
+    } catch (error) {
+      setMessage(error.message || 'Unable to generate image description.');
+    } finally {
+      setDescriptionLoading(false);
+    }
+  };
 
   // Customer creates repair
   const createRepair = async (e) => {
-    e.preventDefault()
-    setMessage('')
+    e.preventDefault();
+    setMessage('');
 
     try {
       const repair = await apiRequest('/api/repairs/', {
         method: 'POST',
         body: JSON.stringify(form),
-      })
+      });
 
       for (const file of damageFiles) {
         await uploadRepairImage(
           repair.id,
           file,
           'customer_damage'
-        )
+        );
       }
 
       setForm({
         appliance_name: '',
         problem_description: '',
-      })
+      });
 
-      setDamageFiles([])
+      setDamageFiles([]);
 
-      setMessage('Repair request submitted successfully!')
-      await loadRepairs()
+      setMessage('Repair request submitted successfully!');
+      await loadRepairs();
     } catch (error) {
-      setMessage(error.message)
-      await loadRepairs()
+      setMessage(error.message);
+      await loadRepairs();
     }
-  }
+  };
 
   // General action
-  const performAction = async (path, method = 'POST', body = null) => {
-    setMessage('')
+  const performAction = async (
+    path,
+    method = 'POST',
+    body = null
+  ) => {
+    setMessage('');
 
     try {
       await apiRequest(path, {
         method,
         body: body ? JSON.stringify(body) : undefined,
-      })
+      });
 
-      setMessage('Action completed successfully!')
-      await loadRepairs()
+      setMessage('Action completed successfully!');
+      await loadRepairs();
     } catch (error) {
-      setMessage(error.message)
+      setMessage(error.message);
     }
-  }
+  };
 
   // Technician submits estimate
   const submitEstimate = async (repairId) => {
-    const value = estimate[repairId]
+    const value = estimate[repairId];
 
     if (!value?.cost || !value?.description?.trim()) {
-      setMessage('Enter estimate amount and description.')
-      return
+      setMessage('Enter estimate amount and description.');
+      return;
     }
 
     await performAction(
@@ -158,28 +203,28 @@ export default function Dashboard({ user, onLogout }) {
         estimated_cost: Number(value.cost),
         estimate_description: value.description,
       }
-    )
-  }
+    );
+  };
 
   // Customer selects estimate
   const chooseEstimate = async (repairId, estimateId) => {
     try {
-      await selectRepairEstimate(repairId, estimateId)
+      await selectRepairEstimate(repairId, estimateId);
 
-      setMessage('Technician selected successfully!')
-      await loadRepairs()
+      setMessage('Technician selected successfully!');
+      await loadRepairs();
     } catch (error) {
-      setMessage(error.message)
+      setMessage(error.message);
     }
-  }
+  };
 
   // Technician uploads completion images
   const uploadCompletionImages = async (repairId) => {
-    const files = completionFiles[repairId] || []
+    const files = completionFiles[repairId] || [];
 
     if (!files.length) {
-      setMessage('Please select completion images.')
-      return
+      setMessage('Please select completion images.');
+      return;
     }
 
     try {
@@ -188,65 +233,93 @@ export default function Dashboard({ user, onLogout }) {
           repairId,
           file,
           'repair_completion'
-        )
+        );
       }
 
-      setCompletionFiles(previous => ({
+      setCompletionFiles((previous) => ({
         ...previous,
         [repairId]: [],
-      }))
+      }));
 
-      setMessage('Completion images uploaded successfully!')
-      await loadRepairs()
+      setMessage('Completion images uploaded successfully!');
+      await loadRepairs();
     } catch (error) {
-      setMessage(error.message)
+      setMessage(error.message);
     }
-  }
+  };
 
   // Customer submits review
   const handleReview = async (repairId) => {
-    const review = reviewForms[repairId]
+    const review = reviewForms[repairId];
 
     if (!review?.rating) {
-      setMessage('Please select a star rating.')
-      return
+      setMessage('Please select a star rating.');
+      return;
     }
 
     try {
       await submitReview(repairId, {
         rating: Number(review.rating),
         comment: review.comment || '',
-      })
+      });
 
-      setReviewedRepairs(previous => ({
+      setReviewedRepairs((previous) => ({
         ...previous,
         [repairId]: true,
-      }))
+      }));
 
-      setMessage('Review submitted successfully!')
-      await loadRepairs()
+      setMessage('Review submitted successfully!');
+      await loadRepairs();
     } catch (error) {
-      setMessage(error.message)
+      setMessage(error.message);
     }
-  }
+  };
+
+  // Customer runs AI visual verification after repair completion
+  const handleVerifyRepair = async (repairId) => {
+    setMessage('');
+
+    setVerificationLoading((previous) => ({
+      ...previous,
+      [repairId]: true,
+    }));
+
+    try {
+      const result = await verifyRepair(repairId);
+
+      setVerificationReports((previous) => ({
+        ...previous,
+        [repairId]: result,
+      }));
+
+      setMessage('AI repair verification completed.');
+    } catch (error) {
+      setMessage(error.message || 'AI verification failed.');
+    } finally {
+      setVerificationLoading((previous) => ({
+        ...previous,
+        [repairId]: false,
+      }));
+    }
+  };
 
   // Display images
   const renderImages = (repairId, imageType) => {
     const list = (images[repairId] || []).filter(
-      item => item.image_type === imageType
-    )
+      (item) => item.image_type === imageType
+    );
 
     if (!list.length) {
       return (
         <p className="mt-2 text-sm text-slate-500">
           No images uploaded yet.
         </p>
-      )
+      );
     }
 
     return (
       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {list.map(item => (
+        {list.map((item) => (
           <a
             key={item.id}
             href={getImageUrl(item.file_path)}
@@ -261,8 +334,8 @@ export default function Dashboard({ user, onLogout }) {
           </a>
         ))}
       </div>
-    )
-  }
+    );
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
@@ -280,8 +353,8 @@ export default function Dashboard({ user, onLogout }) {
 
           <button
             onClick={() => {
-              logout()
-              onLogout()
+              logout();
+              onLogout();
             }}
             className="rounded-lg bg-slate-800 px-4 py-2 text-sm"
           >
@@ -294,7 +367,9 @@ export default function Dashboard({ user, onLogout }) {
 
         {/* HEADER */}
         <h2 className="mb-2 text-3xl font-bold">
-          {isCustomer ? 'Customer Dashboard' : 'Technician Dashboard'}
+          {isCustomer
+            ? 'Customer Dashboard'
+            : 'Technician Dashboard'}
         </h2>
 
         <p className="mb-8 text-slate-400">
@@ -324,11 +399,11 @@ export default function Dashboard({ user, onLogout }) {
               minLength={2}
               placeholder="Appliance name"
               value={form.appliance_name}
-              onChange={e =>
-                setForm({
-                  ...form,
+              onChange={(e) =>
+                setForm((previous) => ({
+                  ...previous,
                   appliance_name: e.target.value,
-                })
+                }))
               }
               className="mb-4 w-full rounded-lg border border-slate-700 bg-slate-950 p-3"
             />
@@ -338,11 +413,11 @@ export default function Dashboard({ user, onLogout }) {
               minLength={10}
               placeholder="Describe the problem..."
               value={form.problem_description}
-              onChange={e =>
-                setForm({
-                  ...form,
+              onChange={(e) =>
+                setForm((previous) => ({
+                  ...previous,
                   problem_description: e.target.value,
-                })
+                }))
               }
               className="mb-4 min-h-28 w-full rounded-lg border border-slate-700 bg-slate-950 p-3"
             />
@@ -355,16 +430,47 @@ export default function Dashboard({ user, onLogout }) {
               type="file"
               accept="image/jpeg,image/png,image/webp"
               multiple
-              onChange={e =>
+              onChange={(e) =>
                 setDamageFiles(Array.from(e.target.files || []))
               }
               className="mb-4 block w-full text-sm text-slate-300"
             />
 
+            {/* AI DAMAGE DESCRIPTION BUTTON */}
+            {damageFiles.length > 0 && (
+              <div className="mb-5 rounded-xl border border-purple-800 bg-purple-950/30 p-4">
+                <h4 className="mb-2 font-semibold text-purple-300">
+                  AI Image Description
+                </h4>
+
+                <p className="mb-3 text-sm text-slate-300">
+                  Let AI identify visible damage in your uploaded image
+                  and suggest text for the problem description.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={generateDamageDescription}
+                  disabled={descriptionLoading}
+                  className="rounded-lg bg-purple-600 px-5 py-3 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {descriptionLoading
+                    ? 'Analyzing image...'
+                    : '✨ Generate description using AI'}
+                </button>
+
+                <p className="mt-3 text-xs text-slate-400">
+                  AI suggestions are optional. Review and edit the
+                  generated description before submitting.
+                </p>
+              </div>
+            )}
+
+            {/* DAMAGE IMAGE PREVIEW */}
             {damageFiles.length > 0 && (
               <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {damageFiles.map((file, index) => (
-                  <div key={index}>
+                  <div key={`${file.name}-${index}`}>
                     <img
                       src={URL.createObjectURL(file)}
                       alt="Damage preview"
@@ -404,7 +510,7 @@ export default function Dashboard({ user, onLogout }) {
 
         <div className="grid gap-5 md:grid-cols-2">
 
-          {repairs.map(repair => (
+          {repairs.map((repair) => (
             <div
               key={repair.id}
               className="rounded-2xl border border-slate-800 bg-slate-900 p-6"
@@ -421,7 +527,7 @@ export default function Dashboard({ user, onLogout }) {
                 </span>
               </div>
 
-              <p className="mb-4 text-sm text-slate-400">
+              <p className="mb-4 whitespace-pre-line text-sm text-slate-400">
                 {repair.problem_description}
               </p>
 
@@ -451,7 +557,7 @@ export default function Dashboard({ user, onLogout }) {
                   )}
 
                   <div className="space-y-3">
-                    {(repairEstimates[repair.id] || []).map(item => (
+                    {(repairEstimates[repair.id] || []).map((item) => (
                       <div
                         key={item.id}
                         className="rounded-xl border border-slate-700 bg-slate-950 p-4"
@@ -513,8 +619,8 @@ export default function Dashboard({ user, onLogout }) {
                     min="1"
                     placeholder="Estimate amount (₹)"
                     value={estimate[repair.id]?.cost || ''}
-                    onChange={e =>
-                      setEstimate(previous => ({
+                    onChange={(e) =>
+                      setEstimate((previous) => ({
                         ...previous,
                         [repair.id]: {
                           ...previous[repair.id],
@@ -528,8 +634,8 @@ export default function Dashboard({ user, onLogout }) {
                   <textarea
                     placeholder="Describe proposed repair work"
                     value={estimate[repair.id]?.description || ''}
-                    onChange={e =>
-                      setEstimate(previous => ({
+                    onChange={(e) =>
+                      setEstimate((previous) => ({
                         ...previous,
                         [repair.id]: {
                           ...previous[repair.id],
@@ -592,12 +698,10 @@ export default function Dashboard({ user, onLogout }) {
                           type="file"
                           accept="image/jpeg,image/png,image/webp"
                           multiple
-                          onChange={e =>
-                            setCompletionFiles(previous => ({
+                          onChange={(e) =>
+                            setCompletionFiles((previous) => ({
                               ...previous,
-                              [repair.id]: Array.from(
-                                e.target.files || []
-                              ),
+                              [repair.id]: Array.from(e.target.files || []),
                             }))
                           }
                           className="mt-4 block w-full text-sm text-slate-300"
@@ -605,9 +709,7 @@ export default function Dashboard({ user, onLogout }) {
 
                         <button
                           type="button"
-                          onClick={() =>
-                            uploadCompletionImages(repair.id)
-                          }
+                          onClick={() => uploadCompletionImages(repair.id)}
                           className="mt-3 rounded-lg bg-blue-600 px-4 py-2"
                         >
                           Upload completion images
@@ -643,6 +745,104 @@ export default function Dashboard({ user, onLogout }) {
                 </div>
               )}
 
+              {/* CUSTOMER AI REPAIR VERIFICATION */}
+              {isCustomer && repair.status === 'completed' && (
+                <div className="my-5 rounded-xl border border-purple-800 bg-purple-950/30 p-4">
+                  <h5 className="mb-2 font-semibold text-purple-300">
+                    AI Repair Verification
+                  </h5>
+
+                  <p className="mb-3 text-sm text-slate-300">
+                    Compare the original damage photos with the technician's
+                    completion photos and the approved repair description.
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={() => handleVerifyRepair(repair.id)}
+                    disabled={Boolean(verificationLoading[repair.id])}
+                    className="rounded-lg bg-purple-600 px-4 py-2 font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {verificationLoading[repair.id]
+                      ? 'Analyzing images...'
+                      : 'Run AI verification'}
+                  </button>
+
+                  {verificationReports[repair.id]?.report && (
+                    <div className="mt-4 space-y-3 rounded-lg border border-slate-700 bg-slate-950 p-4">
+                      {(() => {
+                        const report = verificationReports[repair.id].report;
+                        const status = report.verification_status || 'needs_review';
+
+                        const statusClass =
+                          status === 'verified'
+                            ? 'text-green-400'
+                            : status === 'mismatch'
+                              ? 'text-red-400'
+                              : 'text-yellow-400';
+
+                        return (
+                          <>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="font-semibold">
+                                Verification result
+                              </span>
+
+                              <span className={`font-bold uppercase ${statusClass}`}>
+                                {status.replaceAll('_', ' ')}
+                              </span>
+                            </div>
+
+                            <p className="text-sm text-slate-300">
+                              <strong>Confidence:</strong>{' '}
+                              {Math.round((Number(report.confidence) || 0) * 100)}%
+                            </p>
+
+                            <p className="text-sm text-slate-300">
+                              <strong>Explanation:</strong>{' '}
+                              {report.explanation || 'No explanation provided.'}
+                            </p>
+
+                            {[
+                              ['Original damage', report.original_damage],
+                              ['Completed work detected', report.completed_work_detected],
+                              ['Unresolved issues', report.unresolved_issues],
+                            ].map(([heading, items]) => (
+                              <div key={heading}>
+                                <h6 className="mb-1 text-sm font-semibold text-slate-200">
+                                  {heading}
+                                </h6>
+
+                                {Array.isArray(items) && items.length > 0 ? (
+                                  <ul className="list-disc space-y-1 pl-5 text-sm text-slate-300">
+                                    {items.map((item, index) => (
+                                      <li key={`${heading}-${index}`}>
+                                        {item}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <p className="text-sm text-slate-500">
+                                    No items reported.
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+
+                            <p className="border-t border-slate-800 pt-3 text-xs text-slate-500">
+                              AI visual assessment only. Photos cannot confirm
+                              that the appliance functions correctly or is
+                              electrically safe. Review uncertain results with
+                              a qualified technician.
+                            </p>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* TECHNICIAN RATING */}
               {isCustomer && repair.technician_id && (
                 <div className="my-4 rounded-lg bg-slate-800 p-3">
@@ -675,12 +875,12 @@ export default function Dashboard({ user, onLogout }) {
                   ) : (
                     <>
                       <div className="mb-3 flex gap-2">
-                        {[1, 2, 3, 4, 5].map(star => (
+                        {[1, 2, 3, 4, 5].map((star) => (
                           <button
                             type="button"
                             key={star}
                             onClick={() =>
-                              setReviewForms(previous => ({
+                              setReviewForms((previous) => ({
                                 ...previous,
                                 [repair.id]: {
                                   ...previous[repair.id],
@@ -702,8 +902,8 @@ export default function Dashboard({ user, onLogout }) {
                       <textarea
                         placeholder="Write your feedback..."
                         value={reviewForms[repair.id]?.comment || ''}
-                        onChange={e =>
-                          setReviewForms(previous => ({
+                        onChange={(e) =>
+                          setReviewForms((previous) => ({
                             ...previous,
                             [repair.id]: {
                               ...previous[repair.id],
@@ -735,7 +935,25 @@ export default function Dashboard({ user, onLogout }) {
           </p>
         )}
 
+        {/* DIGITAL REPAIR PASSPORT */}
+        {isCustomer && (
+          <section className="mt-12 border-t border-slate-800 pt-8">
+            <div className="mb-5">
+              <h3 className="text-2xl font-bold text-blue-300">
+                Digital Repair Passport
+              </h3>
+
+              <p className="mt-2 text-sm text-slate-400">
+                View your completed appliance repairs and their permanent
+                repair records.
+              </p>
+            </div>
+
+            <PassportList />
+          </section>
+        )}
+
       </main>
     </div>
-  )
+  );
 }

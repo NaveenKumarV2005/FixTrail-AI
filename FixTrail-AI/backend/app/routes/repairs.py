@@ -29,19 +29,21 @@ from app.schemas import (
     ReviewResponse
 )
 from app.routes.auth import get_current_user, require_role
+from app.routes.passports import create_repair_passport
 
 
 router = APIRouter()
 
-# Store uploads inside the backend/uploads directory
+# Upload directory
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 UPLOAD_DIR = BACKEND_DIR / "uploads" / "repairs"
+
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# --------------------------------------------------
-# CUSTOMER CREATES REPAIR
-# --------------------------------------------------
+# ==================================================
+# 1. CUSTOMER CREATES REPAIR
+# ==================================================
 
 @router.post("/", response_model=RepairResponse)
 def create_repair(
@@ -63,9 +65,9 @@ def create_repair(
     return repair
 
 
-# --------------------------------------------------
-# CUSTOMER VIEWS OWN REPAIRS
-# --------------------------------------------------
+# ==================================================
+# 2. CUSTOMER VIEWS OWN REPAIRS
+# ==================================================
 
 @router.get("/my", response_model=list[RepairResponse])
 def my_repairs(
@@ -74,12 +76,14 @@ def my_repairs(
 ):
     return db.query(RepairJob).filter(
         RepairJob.customer_id == user.id
-    ).order_by(RepairJob.id.desc()).all()
+    ).order_by(
+        RepairJob.id.desc()
+    ).all()
 
 
-# --------------------------------------------------
-# TECHNICIAN VIEWS AVAILABLE REPAIRS
-# --------------------------------------------------
+# ==================================================
+# 3. TECHNICIAN VIEWS AVAILABLE REPAIRS
+# ==================================================
 
 @router.get("/available", response_model=list[RepairResponse])
 def available_repairs(
@@ -89,13 +93,16 @@ def available_repairs(
     return db.query(RepairJob).filter(
         (RepairJob.status == "reported") |
         (RepairJob.technician_id == user.id)
-    ).order_by(RepairJob.id.desc()).all()
+    ).order_by(
+        RepairJob.id.desc()
+    ).all()
 
 
-# --------------------------------------------------
-# LEGACY CLAIM ENDPOINT
-# Claiming is no longer required to submit estimates.
-# --------------------------------------------------
+# ==================================================
+# 4. LEGACY CLAIM ENDPOINT
+# Multiple technicians can submit estimates.
+# No exclusive claim is made.
+# ==================================================
 
 @router.post("/{repair_id}/claim", response_model=RepairResponse)
 def claim_repair(
@@ -119,13 +126,12 @@ def claim_repair(
             detail="Repair is no longer accepting estimates"
         )
 
-    # No exclusive assignment happens here.
     return repair
 
 
-# --------------------------------------------------
-# TECHNICIAN SUBMITS OR UPDATES OWN ESTIMATE
-# --------------------------------------------------
+# ==================================================
+# 5. TECHNICIAN SUBMITS OR UPDATES ESTIMATE
+# ==================================================
 
 @router.post(
     "/{repair_id}/estimate",
@@ -181,9 +187,9 @@ def submit_estimate(
     return estimate
 
 
-# --------------------------------------------------
-# CUSTOMER VIEWS ALL ESTIMATES
-# --------------------------------------------------
+# ==================================================
+# 6. CUSTOMER VIEWS ALL ESTIMATES
+# ==================================================
 
 @router.get(
     "/{repair_id}/estimates",
@@ -207,12 +213,14 @@ def get_repair_estimates(
 
     return db.query(RepairEstimate).filter(
         RepairEstimate.repair_id == repair_id
-    ).order_by(RepairEstimate.estimated_cost.asc()).all()
+    ).order_by(
+        RepairEstimate.estimated_cost.asc()
+    ).all()
 
 
-# --------------------------------------------------
-# CUSTOMER SELECTS TECHNICIAN ESTIMATE
-# --------------------------------------------------
+# ==================================================
+# 7. CUSTOMER SELECTS TECHNICIAN ESTIMATE
+# ==================================================
 
 @router.post(
     "/{repair_id}/estimates/{estimate_id}/select",
@@ -274,9 +282,9 @@ def select_repair_estimate(
     return repair
 
 
-# --------------------------------------------------
-# CUSTOMER APPROVES SELECTED ESTIMATE
-# --------------------------------------------------
+# ==================================================
+# 8. CUSTOMER APPROVES SELECTED ESTIMATE
+# ==================================================
 
 @router.post("/{repair_id}/approve", response_model=RepairResponse)
 def approve_estimate(
@@ -309,9 +317,10 @@ def approve_estimate(
     return repair
 
 
-# --------------------------------------------------
-# TECHNICIAN UPDATES REPAIR STATUS
-# --------------------------------------------------
+# ==================================================
+# 9. TECHNICIAN UPDATES REPAIR STATUS
+# Automatically creates passport when completed.
+# ==================================================
 
 @router.patch("/{repair_id}/status", response_model=RepairResponse)
 def update_repair_status(
@@ -344,15 +353,27 @@ def update_repair_status(
 
     repair.status = new_status
 
-    db.commit()
-    db.refresh(repair)
+    try:
+        if new_status == "completed":
+            create_repair_passport(repair, db)
+
+        db.commit()
+        db.refresh(repair)
+
+    except Exception:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Could not update repair or create repair passport"
+        )
 
     return repair
 
 
-# --------------------------------------------------
-# UPLOAD DAMAGE OR COMPLETION IMAGES
-# --------------------------------------------------
+# ==================================================
+# 10. UPLOAD DAMAGE OR COMPLETION IMAGES
+# ==================================================
 
 @router.post("/{repair_id}/images")
 async def upload_repair_image(
@@ -383,7 +404,9 @@ async def upload_repair_image(
             detail="Repair not found"
         )
 
+    # Customer uploads damage images
     if image_type == "customer_damage":
+
         if user.role != "customer" or repair.customer_id != user.id:
             raise HTTPException(
                 status_code=403,
@@ -396,7 +419,9 @@ async def upload_repair_image(
                 detail="Damage image upload is closed"
             )
 
+    # Selected technician uploads completion images
     if image_type == "repair_completion":
+
         if user.role != "technician" or repair.technician_id != user.id:
             raise HTTPException(
                 status_code=403,
@@ -465,9 +490,9 @@ async def upload_repair_image(
     }
 
 
-# --------------------------------------------------
-# VIEW REPAIR IMAGES
-# --------------------------------------------------
+# ==================================================
+# 11. VIEW REPAIR IMAGES
+# ==================================================
 
 @router.get("/{repair_id}/images")
 def get_repair_images(
@@ -506,7 +531,9 @@ def get_repair_images(
 
     images = db.query(RepairImage).filter(
         RepairImage.repair_id == repair_id
-    ).order_by(RepairImage.id.asc()).all()
+    ).order_by(
+        RepairImage.id.asc()
+    ).all()
 
     return [
         {
@@ -520,9 +547,9 @@ def get_repair_images(
     ]
 
 
-# --------------------------------------------------
-# CUSTOMER SUBMITS REVIEW
-# --------------------------------------------------
+# ==================================================
+# 12. CUSTOMER SUBMITS REVIEW
+# ==================================================
 
 @router.post(
     "/{repair_id}/review",
@@ -582,9 +609,9 @@ def create_repair_review(
     return review
 
 
-# --------------------------------------------------
-# VIEW TECHNICIAN REVIEWS AND AVERAGE RATING
-# --------------------------------------------------
+# ==================================================
+# 13. VIEW TECHNICIAN REVIEWS AND RATING
+# ==================================================
 
 @router.get("/technicians/{technician_id}/reviews")
 def get_technician_reviews(
@@ -604,7 +631,9 @@ def get_technician_reviews(
 
     reviews = db.query(RepairReview).filter(
         RepairReview.technician_id == technician_id
-    ).order_by(RepairReview.id.desc()).all()
+    ).order_by(
+        RepairReview.id.desc()
+    ).all()
 
     average_rating = db.query(
         func.avg(RepairReview.rating)

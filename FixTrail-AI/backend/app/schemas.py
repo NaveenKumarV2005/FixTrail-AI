@@ -104,3 +104,20 @@ class ReviewResponse(BaseModel):
     created_at: Optional[datetime]
 
     model_config = {"from_attributes": True}
+
+
+class RepairPassportResponse(BaseModel):
+    id: int
+    passport_number: str
+    repair_id: int
+    customer_id: int
+    technician_id: int
+    appliance_name: str
+    problem_description: str
+    approved_repair_description: str
+    approved_cost: int
+    repair_status: str
+    completed_at: Optional[datetime]
+    created_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}

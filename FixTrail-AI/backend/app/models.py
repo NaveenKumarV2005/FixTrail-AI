@@ -160,3 +160,56 @@ class RepairReview(Base):
         DateTime(timezone=True),
         server_default=func.now()
     )
+
+
+class RepairPassport(Base):
+    __tablename__ = "repair_passports"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    passport_number = Column(
+        String(50),
+        unique=True,
+        index=True,
+        nullable=False
+    )
+
+    repair_id = Column(
+        Integer,
+        ForeignKey("repair_jobs.id"),
+        unique=True,
+        nullable=False
+    )
+
+    customer_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False
+    )
+
+    technician_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False
+    )
+
+    appliance_name = Column(String(100), nullable=False)
+    problem_description = Column(Text, nullable=False)
+    approved_repair_description = Column(Text, nullable=False)
+    approved_cost = Column(Integer, nullable=False)
+
+    repair_status = Column(
+        String(30),
+        nullable=False,
+        default="completed"
+    )
+
+    completed_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )

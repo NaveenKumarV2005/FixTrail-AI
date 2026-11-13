@@ -6,18 +6,28 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.database import Base, engine
-from app.routes import health, auth, repairs
+from app.routes import (
+    health,
+    auth,
+    repairs,
+    verification,
+    passports
+)
+
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
+
+# Initialize FastAPI
 app = FastAPI(
     title="FixTrail AI",
     description="AI-powered repair verification and digital warranty platform",
     version="1.0.0"
 )
 
-# Frontend access
+
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -26,15 +36,17 @@ app.add_middleware(
     ],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*"]
 )
 
-# Upload directory
+
+# Upload directories
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = BACKEND_DIR / "uploads"
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 (UPLOAD_DIR / "repairs").mkdir(parents=True, exist_ok=True)
+
 
 # Serve uploaded images
 app.mount(
@@ -43,7 +55,8 @@ app.mount(
     name="uploads"
 )
 
-# API routers
+
+# Register API routers
 app.include_router(
     health.router,
     prefix="/api",
@@ -62,7 +75,20 @@ app.include_router(
     tags=["Repairs"]
 )
 
+app.include_router(
+    verification.router,
+    prefix="/api/verification",
+    tags=["AI Verification"]
+)
 
+app.include_router(
+    passports.router,
+    prefix="/api/passports",
+    tags=["Digital Repair Passport"]
+)
+
+
+# Root endpoint
 @app.get("/")
 def root():
     return {
