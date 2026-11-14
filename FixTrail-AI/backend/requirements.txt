@@ -10,3 +10,4 @@ passlib[bcrypt]
 bcrypt
 python-multipart
 pwdlib[argon2]
+groq
